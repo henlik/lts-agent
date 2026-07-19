@@ -43,6 +43,9 @@ sudo install -m 0644 -o root -g root lts-agent.json /opt/lts/config/lts-agent.js
 
 The LBI validation and health scripts and assignment file must be readable by
 the service account, and both scripts must be executable by it.
+The hardened unit permits `AF_NETLINK` because the LBI health script uses
+netlink through `ip route` to verify the default route; it grants no additional
+process capability.
 
 ## Provision enrollment
 

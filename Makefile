@@ -1,5 +1,6 @@
 GO ?= go
 GOCACHE ?= $(CURDIR)/.cache/go-build
+GOMODCACHE ?= $(CURDIR)/.cache/go-mod
 VERSION := 0.7.0
 BIN_DIR := bin
 BINARY := $(BIN_DIR)/lts-agent
@@ -13,23 +14,23 @@ DEB_PACKAGE := $(BIN_DIR)/lts-agent_$(VERSION)_$(DEB_ARCH).deb
 
 build:
 	@mkdir -p $(BIN_DIR)
-	GOCACHE=$(GOCACHE) $(GO) build -o $(BINARY) ./cmd/lts-agent
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) $(GO) build -o $(BINARY) ./cmd/lts-agent
 
 build-linux-amd64:
 	@mkdir -p $(BIN_DIR)
-	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags '-s -w' -o $(LINUX_BINARY) ./cmd/lts-agent
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags '-s -w' -o $(LINUX_BINARY) ./cmd/lts-agent
 
 test:
-	GOCACHE=$(GOCACHE) $(GO) test ./...
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) $(GO) test ./...
 
 test-race:
-	GOCACHE=$(GOCACHE) $(GO) test -race ./...
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) $(GO) test -race ./...
 
 fmt:
-	gofmt -w $$(find cmd internal packaging -type f -name '*.go')
+	gofmt -w $$(find cmd compat internal packaging -type f -name '*.go')
 
 vet:
-	GOCACHE=$(GOCACHE) $(GO) vet ./...
+	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) $(GO) vet ./...
 
 package-stage: build-linux-amd64
 	rm -rf $(PACKAGE_ROOT)

@@ -8,6 +8,8 @@ versioning while its public inventory and Core contracts evolve toward v1.0.
 - Added a hardened systemd oneshot service and five-minute timer.
 - Added Debian/amd64 package staging, build, verification, and release targets.
 - Added a dedicated unprivileged service account and persistent state handling.
+- Added tested LBI compatibility scripts for unprivileged validation and health.
+- Allowed local netlink route inspection within the hardened service sandbox.
 
 ## 0.6.0
 

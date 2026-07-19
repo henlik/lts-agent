@@ -356,6 +356,11 @@ account so reinstalling cannot silently discard the node identity. See
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for package installation, upgrades,
 manual cleanup, recovery, and complete LBI verification.
 
+LBI 1.0 Build 001 scripts require a compatibility adjustment before they can
+report SSH and UFW state from the unprivileged service account. See
+[`docs/LBI-COMPATIBILITY.md`](docs/LBI-COMPATIBILITY.md); the package does not
+alter LBI-owned scripts automatically.
+
 ## Verify on an LBI clone
 
 Build the package on Ubuntu or Debian and copy it to a disposable LBI clone,
