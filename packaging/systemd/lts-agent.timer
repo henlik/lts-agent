@@ -1,0 +1,14 @@
+[Unit]
+Description=Run LTS Agent every five minutes
+Documentation=file:/usr/share/doc/lts-agent/README.md
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+AccuracySec=30s
+Persistent=true
+Unit=lts-agent.service
+
+[Install]
+WantedBy=timers.target

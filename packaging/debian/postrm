@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+# Deliberately preserve /var/lib/lts-agent and its service account. The state
+# contains the node identity needed for a safe reinstall and must only be
+# removed through the documented administrator recovery procedure.
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    if [ "${1:-}" = "purge" ]; then
+        systemctl reset-failed lts-agent.service lts-agent.timer || true
+    fi
+fi
+
+exit 0

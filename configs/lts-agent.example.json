@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "checks": {
+    "validation_path": "/opt/lts/scripts/lbi-validate.sh",
+    "health_path": "/opt/lts/scripts/health-check.sh",
+    "timeout_seconds": 30,
+    "max_output_bytes": 65536
+  },
+  "logging": {
+    "level": "info"
+  },
+  "core": {
+    "enabled": false,
+    "base_url": "https://core.example/api/",
+    "ca_file": "",
+    "request_timeout_seconds": 10,
+    "enrollment_token_file": "/var/lib/lts-agent/enrollment-token",
+    "state_file": "/var/lib/lts-agent/state.json"
+  }
+}

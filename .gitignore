@@ -1,0 +1,19 @@
+# Build outputs
+/bin/
+/build/
+*.deb
+
+# Local Go caches
+/.cache/
+
+# Test and coverage artifacts
+*.test
+*.out
+coverage.txt
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-}" = "remove" ] && [ -d /run/systemd/system ]; then
+    systemctl disable --now lts-agent.timer || true
+fi
+
+exit 0

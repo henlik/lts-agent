@@ -1,0 +1,35 @@
+[Unit]
+Description=Likone Technology Stack node inventory and Core synchronization
+Documentation=file:/usr/share/doc/lts-agent/README.md
+
+[Service]
+Type=oneshot
+User=lts-agent
+Group=lts-agent
+WorkingDirectory=/var/lib/lts-agent
+ExecStart=/usr/bin/lts-agent
+TimeoutStartSec=15min
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lts-agent
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+StateDirectory=lts-agent
+StateDirectoryMode=0700

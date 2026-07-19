@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-}" = "configure" ]; then
+    if ! getent group lts-agent >/dev/null 2>&1; then
+        addgroup --system lts-agent
+    fi
+
+    if ! getent passwd lts-agent >/dev/null 2>&1; then
+        if [ ! -e /var/lib/lts-agent ]; then
+            install -d -m 0700 -o root -g root /var/lib/lts-agent
+        fi
+        adduser \
+            --system \
+            --ingroup lts-agent \
+            --home /var/lib/lts-agent \
+            --no-create-home \
+            --shell /usr/sbin/nologin \
+            --disabled-login \
+            --disabled-password \
+            --gecos "LTS Agent" \
+            lts-agent
+    else
+        account=$(getent passwd lts-agent)
+        home=$(printf '%s' "$account" | cut -d: -f6)
+        shell=$(printf '%s' "$account" | cut -d: -f7)
+        if [ "$home" != "/var/lib/lts-agent" ] || [ "$shell" != "/usr/sbin/nologin" ]; then
+            echo "existing lts-agent account is not the expected locked service account" >&2
+            exit 1
+        fi
+    fi
+
+    install -d -m 0700 -o lts-agent -g lts-agent /var/lib/lts-agent
+
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        systemctl enable --now lts-agent.timer
+    fi
+fi
+
+exit 0
