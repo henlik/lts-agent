@@ -361,6 +361,9 @@ report SSH and UFW state from the unprivileged service account. See
 [`docs/LBI-COMPATIBILITY.md`](docs/LBI-COMPATIBILITY.md); the package does not
 alter LBI-owned scripts automatically.
 
+The live Ubuntu/Proxmox evidence for v0.7.0 on LBI 1.0 Build 002 is recorded in
+[`docs/LBI-BUILD002-ACCEPTANCE.md`](docs/LBI-BUILD002-ACCEPTANCE.md).
+
 ## Verify on an LBI clone
 
 Build the package on Ubuntu or Debian and copy it to a disposable LBI clone,
