@@ -32,8 +32,8 @@ One recovery caveat was observed: after purge/reinstall on an already-running
 node, the preserved persistent-timer stamp can leave the timer `active
 (elapsed)`. Run `systemctl start lts-agent.service` once and confirm
 `systemctl list-timers lts-agent.timer`; this re-armed the verified five-minute
-cadence. Automating this edge-case recovery is scheduled for the next packaging
-revision.
+cadence. Version 0.7.1 addresses the edge case by adding an activation-relative
+first-run deadline while retaining the original boot and cadence timers.
 
 VM 102 and snapshot `lbi-1-0-build002-final` retain the pre-sanitation recovery
 point. Template 901 is the release deployment source. VM 100 and template 900

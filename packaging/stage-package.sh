@@ -33,7 +33,7 @@ install -d -m 0755 \
 install -m 0755 "$linux_binary" "$stage_root/usr/bin/lts-agent"
 install -m 0644 packaging/systemd/lts-agent.service "$stage_root/usr/lib/systemd/system/lts-agent.service"
 install -m 0644 packaging/systemd/lts-agent.timer "$stage_root/usr/lib/systemd/system/lts-agent.timer"
-install -m 0644 README.md LICENSE CHANGELOG.md docs/LTS-CORE-API-v1.md docs/DEPLOYMENT.md docs/LBI-COMPATIBILITY.md docs/lbi-unprivileged-checks.patch "$stage_root/usr/share/doc/lts-agent/"
+install -m 0644 README.md LICENSE CHANGELOG.md docs/LTS-CORE-API-v1.md docs/DEPLOYMENT.md docs/LBI-COMPATIBILITY.md docs/LBI-BUILD002-ACCEPTANCE.md docs/lbi-unprivileged-checks.patch "$stage_root/usr/share/doc/lts-agent/"
 install -m 0644 configs/lts-agent.example.json configs/assigned.example.json "$stage_root/usr/share/doc/lts-agent/examples/"
 install -m 0644 compat/lbi/lbi-unprivileged-checks.sh compat/lbi/lbi-validate.sh compat/lbi/health-check.sh "$stage_root/usr/share/doc/lts-agent/examples/lbi/"
 install -m 0755 packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm "$stage_root/DEBIAN/"

@@ -3,6 +3,13 @@
 All notable changes to LTS Agent are recorded here. The project follows semantic
 versioning while its public inventory and Core contracts evolve toward v1.0.
 
+## 0.7.1
+
+- Guaranteed a first timer run two minutes after timer activation, including
+  package reinstall on an already-running node.
+- Preserved the existing two-minute boot delay, five-minute cadence,
+  randomized delay, persistent scheduling, and all v0.7.0 data contracts.
+
 ## 0.7.0
 
 - Added a hardened systemd oneshot service and five-minute timer.

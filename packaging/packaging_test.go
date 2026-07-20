@@ -61,6 +61,7 @@ func TestTimerUnitContract(t *testing.T) {
 	unit := readProjectFile(t, "packaging/systemd/lts-agent.timer")
 	for _, directive := range []string{
 		"OnBootSec=2min",
+		"OnActiveSec=2min",
 		"OnUnitActiveSec=5min",
 		"RandomizedDelaySec=30s",
 		"AccuracySec=30s",
@@ -136,6 +137,7 @@ func TestPackageStagingLayoutAndModes(t *testing.T) {
 		"usr/share/doc/lts-agent/LTS-CORE-API-v1.md":                      0o644,
 		"usr/share/doc/lts-agent/DEPLOYMENT.md":                           0o644,
 		"usr/share/doc/lts-agent/LBI-COMPATIBILITY.md":                    0o644,
+		"usr/share/doc/lts-agent/LBI-BUILD002-ACCEPTANCE.md":              0o644,
 		"usr/share/doc/lts-agent/lbi-unprivileged-checks.patch":           0o644,
 		"usr/share/doc/lts-agent/examples/lts-agent.example.json":         0o644,
 		"usr/share/doc/lts-agent/examples/assigned.example.json":          0o644,

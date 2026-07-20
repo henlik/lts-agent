@@ -13,7 +13,7 @@ import (
 )
 
 // Version is the semantic version reported by this build of lts-agent.
-const Version = "0.7.0"
+const Version = "0.7.1"
 
 // SystemCollector is the system inventory boundary used by Agent.
 type SystemCollector interface {

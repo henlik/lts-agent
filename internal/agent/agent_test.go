@@ -100,7 +100,7 @@ func TestWriteJSONStableOutput(t *testing.T) {
 
 	want := `{
   "agent": {
-    "version": "0.7.0"
+    "version": "0.7.1"
   },
   "node": {
     "hostname": "lts-app-001"

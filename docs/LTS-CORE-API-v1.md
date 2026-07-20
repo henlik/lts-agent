@@ -18,7 +18,7 @@ The bearer credential is the one-time enrollment token. The request is:
 {
   "schema_version": 1,
   "node_fingerprint": "sha256-hex-value",
-  "agent_version": "0.7.0",
+  "agent_version": "0.7.1",
   "inventory": {}
 }
 ```
@@ -47,7 +47,7 @@ The bearer credential is the node-specific agent token. The request is:
 {
   "schema_version": 1,
   "sent_at": "2026-07-19T12:00:00.123456789Z",
-  "agent_version": "0.7.0",
+  "agent_version": "0.7.1",
   "inventory": {}
 }
 ```

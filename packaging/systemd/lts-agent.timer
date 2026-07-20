@@ -4,6 +4,7 @@ Documentation=file:/usr/share/doc/lts-agent/README.md
 
 [Timer]
 OnBootSec=2min
+OnActiveSec=2min
 OnUnitActiveSec=5min
 RandomizedDelaySec=30s
 AccuracySec=30s

@@ -11,8 +11,8 @@ Run the full release target on Ubuntu or Debian with Go 1.25 or later and
 
 ```sh
 make release-linux-amd64
-dpkg-deb --info bin/lts-agent_0.7.0_amd64.deb
-dpkg-deb --contents bin/lts-agent_0.7.0_amd64.deb
+dpkg-deb --info bin/lts-agent_0.7.1_amd64.deb
+dpkg-deb --contents bin/lts-agent_0.7.1_amd64.deb
 ```
 
 macOS can run `make package-stage` to validate the filesystem layout without
@@ -25,8 +25,8 @@ Copy the package to the node and install it with apt so dependencies are
 validated:
 
 ```sh
-scp bin/lts-agent_0.7.0_amd64.deb ltsadmin@NODE:/tmp/
-ssh ltsadmin@NODE 'sudo apt install /tmp/lts-agent_0.7.0_amd64.deb'
+scp bin/lts-agent_0.7.1_amd64.deb ltsadmin@NODE:/tmp/
+ssh ltsadmin@NODE 'sudo apt install /tmp/lts-agent_0.7.1_amd64.deb'
 ```
 
 Installation creates a locked `lts-agent` system account, prepares
@@ -64,9 +64,12 @@ command-line arguments, logs, tickets, or source control.
 
 ## Operate and diagnose
 
-The timer runs two minutes after boot and then every five minutes, randomized by
-up to 30 seconds. A service invocation may run for at most 15 minutes; systemd
-does not overlap activations of the same oneshot unit.
+The timer runs two minutes after boot or after a fresh timer activation and then
+every five minutes, randomized by up to 30 seconds. The activation-relative
+deadline guarantees that reinstalling on an already-running node re-arms the
+timer even when a persistent trigger stamp exists. A service invocation may run
+for at most 15 minutes; systemd does not overlap activations of the same oneshot
+unit.
 
 ```sh
 systemctl status lts-agent.timer

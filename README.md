@@ -2,7 +2,7 @@
 
 LTS Agent is the node-side software for the Likone Technology Stack (LTS). It
 will eventually register nodes, report health, apply capabilities, and execute
-jobs from LTS Core. Version 0.7.0 packages the single-run agent for hardened,
+jobs from LTS Core. Version 0.7.1 packages the single-run agent for hardened,
 scheduled operation on Ubuntu-based LBI nodes.
 
 The command runs without root privileges and prints one stable, human-readable
@@ -11,7 +11,7 @@ remaining data from being returned.
 
 ## Current scope
 
-Version 0.7.0 collects:
+Version 0.7.1 collects:
 
 - Agent version
 - Node hostname
@@ -119,7 +119,7 @@ On an LBI node, output has this shape:
 ```json
 {
   "agent": {
-    "version": "0.7.0"
+    "version": "0.7.1"
   },
   "node": {
     "hostname": "lts-app-001"
@@ -338,9 +338,10 @@ provisioning a new enrollment token. See
 ## Scheduled deployment
 
 The Debian package installs `/usr/bin/lts-agent`, a hardened oneshot service,
-and a persistent timer. The timer starts two minutes after boot and runs every
-five minutes with up to 30 seconds of random delay. systemd will not start a
-second copy while the same service unit is active.
+and a persistent timer. The timer starts two minutes after boot or fresh timer
+activation and runs every five minutes with up to 30 seconds of random delay.
+The activation deadline makes package reinstall self-rearming. systemd will not
+start a second copy while the same service unit is active.
 
 Inventory remains on stdout and operational logs remain on stderr. systemd
 captures both streams as separate journal records for scheduled executions:
@@ -363,6 +364,8 @@ alter LBI-owned scripts automatically.
 
 The live Ubuntu/Proxmox evidence for v0.7.0 on LBI 1.0 Build 002 is recorded in
 [`docs/LBI-BUILD002-ACCEPTANCE.md`](docs/LBI-BUILD002-ACCEPTANCE.md).
+The v0.7.1 timer-rearm regression evidence is recorded in
+[`docs/V0.7.1-ACCEPTANCE.md`](docs/V0.7.1-ACCEPTANCE.md).
 
 ## Verify on an LBI clone
 
@@ -371,8 +374,8 @@ replacing `NODE` with its address:
 
 ```sh
 make package-verify
-scp bin/lts-agent_0.7.0_amd64.deb ltsadmin@NODE:/tmp/
-ssh ltsadmin@NODE 'sudo apt install /tmp/lts-agent_0.7.0_amd64.deb'
+scp bin/lts-agent_0.7.1_amd64.deb ltsadmin@NODE:/tmp/
+ssh ltsadmin@NODE 'sudo apt install /tmp/lts-agent_0.7.1_amd64.deb'
 ssh ltsadmin@NODE 'sudo -u lts-agent /usr/bin/lts-agent | jq .'
 ```
 
