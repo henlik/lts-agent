@@ -25,9 +25,10 @@ type ConfigLoader func() (config.Config, bool, error)
 // RunnerFactory applies effective configuration to the agent's collectors.
 type RunnerFactory func(config.Config) Runner
 
-// CoreSynchronizer performs the optional registration and heartbeat workflow.
+// CoreSynchronizer performs the optional registration, heartbeat, and desired-
+// state workflow.
 type CoreSynchronizer interface {
-	Sync(context.Context, inventory.Report) (*inventory.Core, []inventory.Warning)
+	Sync(context.Context, inventory.Report) (*inventory.Core, *inventory.DesiredState, []inventory.Warning)
 }
 
 // CoreSynchronizerFactory constructs the configured HTTPS workflow.
@@ -70,6 +71,7 @@ func (a App) Run(ctx context.Context) int {
 	startedAt := a.Now()
 	logger.Info("inventory collection started", "event", "collection_started")
 	report := a.NewRunner(configuration).Collect(ctx)
+	ensureDesiredState(&report)
 	if configuration.Core.Enabled {
 		logger.Info("Core synchronization started", "event", "core_sync_started")
 		synchronizer, err := a.NewCoreSynchronizer(configuration)
@@ -78,17 +80,20 @@ func (a App) Run(ctx context.Context) int {
 				Enabled:      true,
 				Registration: inventory.Operation{Status: "failed"},
 				Heartbeat:    inventory.Operation{Status: "skipped"},
+				DesiredState: inventory.Operation{Status: "skipped"},
 			}
 			report.Warnings = append(report.Warnings, inventory.Warning{Source: "core.client", Message: err.Error()})
 		} else {
 			var coreWarnings []inventory.Warning
-			report.Core, coreWarnings = synchronizer.Sync(ctx, report)
+			report.Core, report.DesiredState, coreWarnings = synchronizer.Sync(ctx, report)
+			ensureDesiredState(&report)
 			report.Warnings = append(report.Warnings, coreWarnings...)
 		}
 	} else {
 		report.Core = &inventory.Core{
 			Registration: inventory.Operation{Status: "disabled"},
 			Heartbeat:    inventory.Operation{Status: "disabled"},
+			DesiredState: inventory.Operation{Status: "disabled"},
 		}
 	}
 	for _, warning := range report.Warnings {
@@ -101,6 +106,7 @@ func (a App) Run(ctx context.Context) int {
 			"registered", report.Core.Registered,
 			"registration_status", report.Core.Registration.Status,
 			"heartbeat_status", report.Core.Heartbeat.Status,
+			"desired_state_status", report.Core.DesiredState.Status,
 		)
 	}
 
@@ -118,8 +124,21 @@ func (a App) Run(ctx context.Context) int {
 		"health_status", report.Checks.Health.Status,
 		"core_enabled", report.Core.Enabled,
 		"core_registered", report.Core.Registered,
+		"desired_state_available", report.DesiredState.Available,
 	)
 	return 0
+}
+
+func ensureDesiredState(report *inventory.Report) {
+	if report.DesiredState == nil {
+		report.DesiredState = &inventory.DesiredState{}
+	}
+	if report.DesiredState.Roles == nil {
+		report.DesiredState.Roles = []string{}
+	}
+	if report.DesiredState.Capabilities == nil {
+		report.DesiredState.Capabilities = []string{}
+	}
 }
 
 func newLogger(writer io.Writer, level slog.Level) *slog.Logger {

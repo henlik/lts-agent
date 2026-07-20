@@ -170,6 +170,16 @@ func TestPackageStagingLayoutAndModes(t *testing.T) {
 			t.Errorf("control file missing %q", field)
 		}
 	}
+
+	apiDocument, err := os.ReadFile(filepath.Join(stage, "usr/share/doc/lts-agent/LTS-CORE-API-v1.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"GET v1/nodes/{node_id}/desired-state", `"revision": "rev-123"`, "not cached"} {
+		if !strings.Contains(string(apiDocument), required) {
+			t.Errorf("staged Core API documentation missing %q", required)
+		}
+	}
 }
 
 func TestMakefileVersionMatchesAgent(t *testing.T) {

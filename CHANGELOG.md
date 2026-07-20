@@ -3,6 +3,16 @@
 All notable changes to LTS Agent are recorded here. The project follows semantic
 versioning while its public inventory and Core contracts evolve toward v1.0.
 
+## 0.8.0
+
+- Added authenticated desired-state retrieval after each enabled Core heartbeat.
+- Added strict schema-v1 revision, role, and capability validation with stable
+  deduplication and sorting.
+- Added an always-present, unapplied `desired_state` inventory object and a
+  corresponding Core operation summary.
+- Kept desired state out of registration and heartbeat snapshots and preserved
+  Core-disabled zero-network behavior.
+
 ## 0.7.1
 
 - Guaranteed a first timer run two minutes after timer activation, including

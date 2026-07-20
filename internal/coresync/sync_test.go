@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	coreclient "github.com/henlik/lts-agent/internal/core"
+	"github.com/henlik/lts-agent/internal/desired"
 	"github.com/henlik/lts-agent/internal/inventory"
 )
 
@@ -45,7 +48,7 @@ func TestSyncDisabledPerformsNoIO(t *testing.T) {
 
 	client := &fakeClient{}
 	synchronizer := New(client, Options{Enabled: false})
-	result, warnings := synchronizer.Sync(context.Background(), inventory.Report{})
+	result, _, warnings := synchronizer.Sync(context.Background(), inventory.Report{})
 	if result.Enabled || result.Registration.Status != "disabled" || result.Heartbeat.Status != "disabled" {
 		t.Fatalf("result = %#v, want disabled", result)
 	}
@@ -65,7 +68,7 @@ func TestSyncRegistersPersistsDeletesTokenAndHeartbeats(t *testing.T) {
 				t.Fatalf("registration bearer = %q", bearer)
 			}
 			document := request.(registrationRequest)
-			if document.SchemaVersion != 1 || document.AgentVersion != "0.6.0" || document.Inventory.Core != nil {
+			if document.SchemaVersion != 1 || document.AgentVersion != "0.6.0" || document.Inventory.Core != nil || document.Inventory.DesiredState != nil {
 				t.Fatalf("registration request = %#v", document)
 			}
 			hash := sha256.Sum256([]byte("lts-agent-registration-v1:" + testMachineID))
@@ -78,12 +81,17 @@ func TestSyncRegistersPersistsDeletesTokenAndHeartbeats(t *testing.T) {
 				t.Fatalf("heartbeat bearer = %q", bearer)
 			}
 			document := request.(heartbeatRequest)
-			if document.SchemaVersion != 1 || document.AgentVersion != "0.6.0" || document.Inventory.Core != nil {
+			if document.SchemaVersion != 1 || document.AgentVersion != "0.6.0" || document.Inventory.Core != nil || document.Inventory.DesiredState != nil {
 				t.Fatalf("heartbeat request = %#v", document)
 			}
 			if document.SentAt != "2026-07-19T12:00:00.123456789Z" {
 				t.Fatalf("SentAt = %q", document.SentAt)
 			}
+		case "v1/nodes/node-123/desired-state":
+			if bearer != "node-token" || request != nil {
+				t.Fatalf("desired request bearer = %q, body = %#v", bearer, request)
+			}
+			*response.(*desired.Document) = desired.Document{SchemaVersion: 1, Revision: "rev-123", Roles: []string{}, Capabilities: []string{}}
 		default:
 			t.Fatalf("unexpected endpoint %q", endpoint)
 		}
@@ -91,18 +99,19 @@ func TestSyncRegistersPersistsDeletesTokenAndHeartbeats(t *testing.T) {
 	}}
 	report := inventory.Report{Agent: inventory.Agent{Version: "0.6.0"}, Core: &inventory.Core{Enabled: true}}
 	synchronizer := NewWithDependencies(client, fixture.options(), fixture.dependencies())
-	result, warnings := synchronizer.Sync(context.Background(), report)
+	result, desiredState, warnings := synchronizer.Sync(context.Background(), report)
 
 	if !result.Enabled || !result.Registered || result.NodeID != "node-123" || result.Registration.Status != "succeeded" || !result.Registration.Attempted || result.Heartbeat.Status != "succeeded" || !result.Heartbeat.Attempted {
 		t.Fatalf("result = %#v", result)
 	}
-	if len(warnings) != 0 || len(client.calls) != 2 {
+	if desiredState == nil || !desiredState.Available || desiredState.Revision != "rev-123" {
+		t.Fatalf("desired state = %#v", desiredState)
+	}
+	if len(warnings) != 0 || len(client.calls) != 3 {
 		t.Fatalf("warnings = %#v, calls = %#v", warnings, client.calls)
 	}
-	for _, call := range client.calls {
-		if call.method != http.MethodPost {
-			t.Fatalf("method = %q, want POST", call.method)
-		}
+	if got := []string{client.calls[0].method, client.calls[1].method, client.calls[2].method}; !reflect.DeepEqual(got, []string{http.MethodPost, http.MethodPost, http.MethodGet}) {
+		t.Fatalf("methods = %#v", got)
 	}
 	if _, err := os.Stat(fixture.tokenPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("enrollment token still exists: %v", err)
@@ -118,6 +127,121 @@ func TestSyncRegistersPersistsDeletesTokenAndHeartbeats(t *testing.T) {
 	}
 }
 
+func TestSyncHeartbeatFailureDoesNotPreventDesiredState(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	writeStateFixture(t, fixture.statePath, stateDocument{SchemaVersion: 1, NodeID: "node-1", AgentToken: "node-token"}, 0o600)
+	client := &fakeClient{do: func(endpoint, _ string, request, response any) error {
+		switch endpoint {
+		case "v1/nodes/node-1/heartbeat":
+			return errors.New("heartbeat transport failed")
+		case "v1/nodes/node-1/desired-state":
+			if request != nil {
+				t.Fatalf("desired GET body = %#v, want nil", request)
+			}
+			*response.(*desired.Document) = desired.Document{SchemaVersion: 1, Revision: "rev-2", Roles: []string{"application-node"}, Capabilities: []string{"docker"}}
+			return nil
+		default:
+			t.Fatalf("unexpected endpoint %q", endpoint)
+			return nil
+		}
+	}}
+	result, desiredState, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+	if result.Heartbeat.Status != "failed" || result.DesiredState.Status != "succeeded" || desiredState.Revision != "rev-2" {
+		t.Fatalf("result = %#v, desired = %#v", result, desiredState)
+	}
+	if len(warnings) != 1 || warnings[0].Source != "core.heartbeat" {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+	if got := []string{client.calls[0].endpoint, client.calls[1].endpoint}; !reflect.DeepEqual(got, []string{"v1/nodes/node-1/heartbeat", "v1/nodes/node-1/desired-state"}) {
+		t.Fatalf("endpoint order = %#v", got)
+	}
+}
+
+func TestSyncDesiredFailureIsNonfatalSanitizedAndOrderedAfterHeartbeat(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	writeStateFixture(t, fixture.statePath, stateDocument{SchemaVersion: 1, NodeID: "node-1", AgentToken: "node-token"}, 0o600)
+	client := &fakeClient{do: func(endpoint, _ string, _ any, _ any) error {
+		if strings.HasSuffix(endpoint, "/heartbeat") {
+			return errors.New("heartbeat failed")
+		}
+		return &coreclient.HTTPError{StatusCode: 404, Body: "node-token secret response"}
+	}}
+	result, desiredState, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+	if result.DesiredState.Status != "failed" || desiredState.Available || desiredState.Roles == nil || desiredState.Capabilities == nil {
+		t.Fatalf("result = %#v, desired = %#v", result, desiredState)
+	}
+	if len(warnings) != 2 || warnings[0].Source != "core.heartbeat" || warnings[1].Source != "core.desired_state" || warnings[1].Message != "LTS Core returned HTTP 404" {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+}
+
+func TestSyncCallerCancellationSkipsDesiredState(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	writeStateFixture(t, fixture.statePath, stateDocument{SchemaVersion: 1, NodeID: "node-1", AgentToken: "node-token"}, 0o600)
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &fakeClient{do: func(endpoint, _ string, _ any, _ any) error {
+		if strings.HasSuffix(endpoint, "/heartbeat") {
+			cancel()
+			return context.Canceled
+		}
+		t.Fatalf("desired state called after cancellation: %q", endpoint)
+		return nil
+	}}
+	result, desiredState, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(ctx, inventory.Report{})
+	if result.DesiredState.Attempted || result.DesiredState.Status != "skipped" || desiredState.Available || len(client.calls) != 1 {
+		t.Fatalf("result = %#v, desired = %#v, calls = %#v", result, desiredState, client.calls)
+	}
+	if len(warnings) != 1 || warnings[0].Source != "core.heartbeat" {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+}
+
+func TestSyncDesiredStateOverTLSWithBasePath(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	writeStateFixture(t, fixture.statePath, stateDocument{SchemaVersion: 1, NodeID: "node-123", AgentToken: "node-token"}, 0o600)
+	var requests []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests = append(requests, request.Method+" "+request.URL.Path)
+		if request.Header.Get("Authorization") != "Bearer node-token" {
+			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
+		}
+		switch request.URL.Path {
+		case "/api/v1/nodes/node-123/heartbeat":
+			writer.WriteHeader(http.StatusNoContent)
+		case "/api/v1/nodes/node-123/desired-state":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"schema_version":1,"revision":"rev-123","roles":["worker-node","application-node","worker-node"],"capabilities":["postgresql","docker"]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	caPath := filepath.Join(t.TempDir(), "core-ca.pem")
+	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(caPath, certificate, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client, err := coreclient.New(coreclient.Options{BaseURL: server.URL + "/api/", Timeout: time.Second, CAFile: caPath, UserAgent: "lts-agent/0.8.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, desiredState, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+	if len(warnings) != 0 || result.Heartbeat.Status != "succeeded" || result.DesiredState.Status != "succeeded" {
+		t.Fatalf("result = %#v, warnings = %#v", result, warnings)
+	}
+	if want := []string{"application-node", "worker-node"}; !reflect.DeepEqual(desiredState.Roles, want) {
+		t.Fatalf("roles = %#v, want %#v", desiredState.Roles, want)
+	}
+	wantRequests := []string{"POST /api/v1/nodes/node-123/heartbeat", "GET /api/v1/nodes/node-123/desired-state"}
+	if !reflect.DeepEqual(requests, wantRequests) {
+		t.Fatalf("requests = %#v, want %#v", requests, wantRequests)
+	}
+}
+
 func TestSyncUsesExistingStateWithoutEnrollment(t *testing.T) {
 	t.Parallel()
 
@@ -126,17 +250,22 @@ func TestSyncUsesExistingStateWithoutEnrollment(t *testing.T) {
 	if err := os.Remove(fixture.tokenPath); err != nil {
 		t.Fatal(err)
 	}
-	client := &fakeClient{do: func(endpoint, bearer string, _ any, _ any) error {
-		if endpoint != "v1/nodes/existing-node/heartbeat" || bearer != "existing-token" {
-			t.Fatalf("endpoint = %q, bearer = %q", endpoint, bearer)
+	client := &fakeClient{do: func(endpoint, bearer string, _ any, response any) error {
+		if bearer != "existing-token" {
+			t.Fatalf("bearer = %q", bearer)
+		}
+		if endpoint == "v1/nodes/existing-node/desired-state" {
+			*response.(*desired.Document) = desired.Document{SchemaVersion: 1, Revision: "rev-empty", Roles: []string{}, Capabilities: []string{}}
+		} else if endpoint != "v1/nodes/existing-node/heartbeat" {
+			t.Fatalf("endpoint = %q", endpoint)
 		}
 		return nil
 	}}
-	result, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+	result, _, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 	if !result.Registered || result.Registration.Attempted || result.Registration.Status != "not_needed" || result.Heartbeat.Status != "succeeded" {
 		t.Fatalf("result = %#v", result)
 	}
-	if len(client.calls) != 1 || len(warnings) != 0 {
+	if len(client.calls) != 2 || len(warnings) != 0 {
 		t.Fatalf("calls = %#v, warnings = %#v", client.calls, warnings)
 	}
 }
@@ -149,7 +278,7 @@ func TestSyncSanitizesRegistrationAndHeartbeatHTTPFailures(t *testing.T) {
 		client := &fakeClient{do: func(string, string, any, any) error {
 			return &coreclient.HTTPError{StatusCode: 401, Body: "enrollment-token"}
 		}}
-		result, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if result.Registration.Status != "failed" || result.Heartbeat.Status != "skipped" || len(warnings) != 1 {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -161,10 +290,14 @@ func TestSyncSanitizesRegistrationAndHeartbeatHTTPFailures(t *testing.T) {
 	t.Run("heartbeat", func(t *testing.T) {
 		fixture := newFixture(t)
 		writeStateFixture(t, fixture.statePath, stateDocument{SchemaVersion: 1, NodeID: "node-1", AgentToken: "node-token"}, 0o600)
-		client := &fakeClient{do: func(string, string, any, any) error {
-			return &coreclient.HTTPError{StatusCode: 403, Body: "node-token"}
+		client := &fakeClient{do: func(endpoint, _ string, _ any, response any) error {
+			if strings.HasSuffix(endpoint, "/heartbeat") {
+				return &coreclient.HTTPError{StatusCode: 403, Body: "node-token"}
+			}
+			*response.(*desired.Document) = desired.Document{SchemaVersion: 1, Revision: "rev-1", Roles: []string{}, Capabilities: []string{}}
+			return nil
 		}}
-		result, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if !result.Registered || result.Heartbeat.Status != "failed" || len(warnings) != 1 || warnings[0].Message != "LTS Core returned HTTP 403" {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -186,7 +319,7 @@ func TestSyncWarnsWhenConsumedTokenCannotBeRemoved(t *testing.T) {
 		}
 		return os.Remove(path)
 	}
-	result, warnings := NewWithDependencies(client, fixture.options(), deps).Sync(context.Background(), inventory.Report{})
+	result, _, warnings := NewWithDependencies(client, fixture.options(), deps).Sync(context.Background(), inventory.Report{})
 	if result.Heartbeat.Status != "succeeded" || len(warnings) != 1 || warnings[0].Source != "core.enrollment" {
 		t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 	}
@@ -216,7 +349,7 @@ func TestSyncRejectsInvalidStateWithoutOverwriting(t *testing.T) {
 				t.Fatal(err)
 			}
 			client := &fakeClient{}
-			result, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+			result, _, warnings := NewWithDependencies(client, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 			if result.Registration.Status != "failed" || len(client.calls) != 0 || len(warnings) != 1 || !strings.Contains(warnings[0].Message, test.want) {
 				t.Fatalf("result = %#v, calls = %#v, warnings = %#v", result, client.calls, warnings)
 			}
@@ -230,7 +363,7 @@ func TestSyncRejectsInvalidStateWithoutOverwriting(t *testing.T) {
 		if err := os.Symlink(target, fixture.statePath); err != nil {
 			t.Fatal(err)
 		}
-		result, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if result.Registration.Status != "failed" || len(warnings) != 1 || !strings.Contains(warnings[0].Message, "non-symlink") {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -243,7 +376,7 @@ func TestSyncReportsRegistrationPrerequisiteAndPersistenceFailures(t *testing.T)
 	t.Run("missing machine ID", func(t *testing.T) {
 		fixture := newFixture(t)
 		fixture.machineIDPath = filepath.Join(fixture.directory, "missing-machine-id")
-		result, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if result.Registration.Status != "failed" || len(warnings) != 1 || !strings.Contains(warnings[0].Message, "read machine ID") {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -254,7 +387,7 @@ func TestSyncReportsRegistrationPrerequisiteAndPersistenceFailures(t *testing.T)
 		if err := os.WriteFile(fixture.machineIDPath, []byte("not-a-machine-id"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		result, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if len(warnings) != 1 || !strings.Contains(warnings[0].Message, "32 hexadecimal") {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -265,7 +398,7 @@ func TestSyncReportsRegistrationPrerequisiteAndPersistenceFailures(t *testing.T)
 		if err := os.Remove(fixture.tokenPath); err != nil {
 			t.Fatal(err)
 		}
-		result, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if len(warnings) != 1 || !strings.Contains(warnings[0].Message, "inspect enrollment token") {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -276,7 +409,7 @@ func TestSyncReportsRegistrationPrerequisiteAndPersistenceFailures(t *testing.T)
 		if err := os.Chmod(fixture.tokenPath, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		result, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if len(warnings) != 1 || !strings.Contains(warnings[0].Message, "permissions") {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -291,7 +424,7 @@ func TestSyncReportsRegistrationPrerequisiteAndPersistenceFailures(t *testing.T)
 		if err := os.Symlink(target, fixture.tokenPath); err != nil {
 			t.Fatal(err)
 		}
-		result, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(&fakeClient{}, fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if result.Registration.Status != "failed" || len(warnings) != 1 || !strings.Contains(warnings[0].Message, "non-symlink") {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -304,7 +437,7 @@ func TestSyncReportsRegistrationPrerequisiteAndPersistenceFailures(t *testing.T)
 			t.Fatal(err)
 		}
 		fixture.statePath = filepath.Join(stateDirectory, "state.json")
-		result, warnings := NewWithDependencies(successfulRegistrationClient(), fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(successfulRegistrationClient(), fixture.options(), fixture.dependencies()).Sync(context.Background(), inventory.Report{})
 		if result.Registered || result.Registration.Status != "failed" || len(warnings) != 1 || !strings.Contains(warnings[0].Message, "state directory permissions") {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -314,7 +447,7 @@ func TestSyncReportsRegistrationPrerequisiteAndPersistenceFailures(t *testing.T)
 		fixture := newFixture(t)
 		deps := fixture.dependencies()
 		deps.Rename = func(string, string) error { return errors.New("rename denied") }
-		result, warnings := NewWithDependencies(successfulRegistrationClient(), fixture.options(), deps).Sync(context.Background(), inventory.Report{})
+		result, _, warnings := NewWithDependencies(successfulRegistrationClient(), fixture.options(), deps).Sync(context.Background(), inventory.Report{})
 		if result.Registered || result.Registration.Status != "failed" || len(warnings) != 1 || !strings.Contains(warnings[0].Message, "persist Core state") {
 			t.Fatalf("result = %#v, warnings = %#v", result, warnings)
 		}
@@ -414,6 +547,8 @@ func successfulRegistrationClient() *fakeClient {
 	return &fakeClient{do: func(endpoint, _ string, _ any, response any) error {
 		if endpoint == RegistrationEndpoint {
 			*response.(*registrationResponse) = registrationResponse{SchemaVersion: 1, NodeID: "node-123", AgentToken: "node-token"}
+		} else if strings.HasSuffix(endpoint, DesiredStateEndpointSuffix) {
+			*response.(*desired.Document) = desired.Document{SchemaVersion: 1, Revision: "rev-1", Roles: []string{}, Capabilities: []string{}}
 		}
 		return nil
 	}}

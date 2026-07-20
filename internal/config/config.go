@@ -55,7 +55,7 @@ type Logging struct {
 	Level string
 }
 
-// Core controls the opt-in registration and heartbeat workflow.
+// Core controls the opt-in registration, heartbeat, and desired-state workflow.
 type Core struct {
 	Enabled               bool
 	BaseURL               string

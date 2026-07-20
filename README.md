@@ -2,8 +2,8 @@
 
 LTS Agent is the node-side software for the Likone Technology Stack (LTS). It
 will eventually register nodes, report health, apply capabilities, and execute
-jobs from LTS Core. Version 0.7.1 packages the single-run agent for hardened,
-scheduled operation on Ubuntu-based LBI nodes.
+jobs from LTS Core. Version 0.8.0 adds observation-only retrieval of desired
+assignments to the hardened, externally scheduled agent.
 
 The command runs without root privileges and prints one stable, human-readable
 JSON document to standard output. Missing inventory sources do not prevent the
@@ -11,7 +11,7 @@ remaining data from being returned.
 
 ## Current scope
 
-Version 0.7.1 collects:
+Version 0.8.0 collects:
 
 - Agent version
 - Node hostname
@@ -23,6 +23,7 @@ Version 0.7.1 collects:
 - Assigned roles and capabilities from `/opt/lts/roles/assigned.json`
 - LBI compliance validation from `/opt/lts/scripts/lbi-validate.sh`
 - Runtime health from `/opt/lts/scripts/health-check.sh`
+- Desired roles and capabilities from LTS Core when synchronization is enabled
 
 It also supports strict local configuration, structured operational logging,
 secure synchronization with LTS Core, and external scheduling through a systemd
@@ -44,7 +45,9 @@ components:
 - `internal/config` loads, defaults, and validates the local configuration.
 - `internal/core` provides bounded, TLS-verified and bearer-authenticated JSON
   transport.
-- `internal/coresync` owns registration, credential state, and heartbeat.
+- `internal/coresync` owns registration, credential state, heartbeat, and
+  desired-state retrieval.
+- `internal/desired` strictly parses and normalizes Core desired state.
 - `internal/inventory` owns the stable JSON schema.
 - `internal/lbi` safely parses LBI metadata without evaluating shell content.
 - `internal/role` strictly validates and inventories assigned roles and
@@ -119,7 +122,7 @@ On an LBI node, output has this shape:
 ```json
 {
   "agent": {
-    "version": "0.7.1"
+    "version": "0.8.0"
   },
   "node": {
     "hostname": "lts-app-001"
@@ -168,6 +171,18 @@ On an LBI node, output has this shape:
       "truncated": false
     }
   },
+  "desired_state": {
+    "available": true,
+    "schema_version": 1,
+    "revision": "rev-123",
+    "roles": [
+      "application-node"
+    ],
+    "capabilities": [
+      "docker",
+      "postgresql"
+    ]
+  },
   "core": {
     "enabled": true,
     "registered": true,
@@ -179,12 +194,19 @@ On an LBI node, output has this shape:
     "heartbeat": {
       "attempted": true,
       "status": "succeeded"
+    },
+    "desired_state": {
+      "attempted": true,
+      "status": "succeeded"
     }
   }
 }
 ```
 
-`lbi.available` is always present. Optional LBI metadata fields are omitted when
+`lbi.available` and `desired_state` are always present. Desired-state role and
+capability arrays remain `[]` when Core is disabled, retrieval is skipped, or
+retrieval fails; its schema version and revision are then omitted. Optional LBI
+metadata fields are omitted when
 the release file is absent or contains only partial metadata. Collection failures
 are nonfatal and appear in an optional top-level `warnings` array:
 
@@ -252,7 +274,9 @@ Lifecycle events are `config_defaults_used` or `config_loaded`,
 `collection_completed`. Fatal startup and output failures use `config_invalid`
 and `inventory_write_failed`. The configured minimum log level applies to all
 events. Enabled Core workflows additionally emit `core_sync_started` and
-`core_sync_completed` without credential values.
+`core_sync_completed` without credential values. The Core completion event
+includes `desired_state_status`; `collection_completed` includes
+`desired_state_available`. Desired payload contents are never logged.
 
 ## Role and capability assignments
 
@@ -298,9 +322,9 @@ code.
 
 ## LTS Core HTTPS client
 
-Version 0.7 uses the context-aware JSON client for registration and heartbeat
-only when schema-v2 configuration sets `core.enabled` to true. Disabled and
-schema-v1 configurations perform no Core network activity.
+Version 0.8 uses the context-aware JSON client for registration, heartbeat, and
+desired-state retrieval only when schema-v2 configuration sets `core.enabled`
+to true. Disabled and schema-v1 configurations perform no Core network activity.
 
 The client requires an HTTPS origin, verifies hostnames with the system trust
 store, optionally appends a private PEM CA bundle, and enforces TLS 1.2 or newer.
@@ -310,7 +334,9 @@ User-Agent. Non-2xx responses return a typed status error with a bounded body
 excerpt.
 
 Registration exchanges a one-time enrollment bearer token for a node ID and a
-node-specific bearer token. Each invocation then sends one inventory heartbeat.
+node-specific bearer token. Each invocation then sends one inventory heartbeat
+and retrieves the latest desired assignments. A normal heartbeat failure does
+not prevent retrieval; caller cancellation stops remaining work.
 There are no automatic retries or background loop; scheduling remains external.
 The client does not support insecure TLS or place credentials in logs.
 
@@ -327,8 +353,15 @@ sudo install -m 0600 -o lts-agent -g lts-agent enrollment-token /var/lib/lts-age
 
 Enable Core in `/opt/lts/config/lts-agent.json` and run `lts-agent`. Successful
 registration atomically writes `/var/lib/lts-agent/state.json` with mode `0600`,
-deletes the consumed enrollment token, and immediately sends one heartbeat.
-Subsequent invocations load state and send only the heartbeat.
+deletes the consumed enrollment token, immediately sends one heartbeat, and
+retrieves desired state. Subsequent invocations load state, send the heartbeat,
+and retrieve desired state.
+
+Desired state is observation-only. It is never cached or written to
+`/opt/lts/roles/assigned.json`, and it is omitted from registration and
+heartbeat inventory snapshots to avoid recursively reporting synchronization
+results. The local `assignment` field continues to represent current local
+assignment; `desired_state` represents unapplied Core intent.
 
 Invalid state is never overwritten automatically. For HTTP authentication,
 missing-node, or server failures, inspect structured logs and Core state before
@@ -374,8 +407,8 @@ replacing `NODE` with its address:
 
 ```sh
 make package-verify
-scp bin/lts-agent_0.7.1_amd64.deb ltsadmin@NODE:/tmp/
-ssh ltsadmin@NODE 'sudo apt install /tmp/lts-agent_0.7.1_amd64.deb'
+scp bin/lts-agent_0.8.0_amd64.deb ltsadmin@NODE:/tmp/
+ssh ltsadmin@NODE 'sudo apt install /tmp/lts-agent_0.8.0_amd64.deb'
 ssh ltsadmin@NODE 'sudo -u lts-agent /usr/bin/lts-agent | jq .'
 ```
 
@@ -394,8 +427,10 @@ after its next activation.
 
 ## Roadmap
 
-- **v0.8:** Retrieve and report desired state without applying changes.
-- **v0.9:** Add controlled capability and role application.
+- **v0.8 (current):** Retrieve and report desired state without applying
+  changes.
+- **v0.9:** Add controlled capability and role application with revision
+  acknowledgement and explicit safety gates.
 - **v1.0:** Deliver the production-ready lifecycle, security, and update model.
 
 ## License

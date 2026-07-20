@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"sort"
 
+	"github.com/henlik/lts-agent/internal/identifier"
 	"github.com/henlik/lts-agent/internal/inventory"
 )
 
@@ -20,8 +20,6 @@ const (
 	// SupportedSchemaVersion identifies the only file schema understood by v0.2.
 	SupportedSchemaVersion = 1
 )
-
-var identifierPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // ReadFileFunc is the filesystem boundary needed by Collector.
 type ReadFileFunc func(string) ([]byte, error)
@@ -121,7 +119,7 @@ func validateIdentifiers(source string, values []string) ([]string, []inventory.
 	unique := make(map[string]struct{}, len(values))
 	var warnings []inventory.Warning
 	for _, value := range values {
-		if !identifierPattern.MatchString(value) {
+		if !identifier.Valid(value) {
 			warnings = append(warnings, inventory.Warning{
 				Source:  source,
 				Message: fmt.Sprintf("invalid identifier %q; expected lowercase letters, digits, and internal hyphens", value),

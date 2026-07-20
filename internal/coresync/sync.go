@@ -1,4 +1,5 @@
-// Package coresync implements one opt-in registration and heartbeat cycle.
+// Package coresync implements one opt-in registration, heartbeat, and desired-
+// state retrieval cycle.
 // It owns credential state but delegates all HTTPS behavior to the Core client.
 package coresync
 
@@ -20,14 +21,16 @@ import (
 	"time"
 
 	coreclient "github.com/henlik/lts-agent/internal/core"
+	"github.com/henlik/lts-agent/internal/desired"
 	"github.com/henlik/lts-agent/internal/inventory"
 )
 
 const (
-	RegistrationEndpoint = "v1/nodes/register"
-	DefaultMachineIDPath = "/etc/machine-id"
-	stateSchemaVersion   = 1
-	wireSchemaVersion    = 1
+	RegistrationEndpoint       = "v1/nodes/register"
+	DesiredStateEndpointSuffix = "/desired-state"
+	DefaultMachineIDPath       = "/etc/machine-id"
+	stateSchemaVersion         = 1
+	wireSchemaVersion          = 1
 )
 
 var (
@@ -60,7 +63,8 @@ type Dependencies struct {
 	Now        func() time.Time
 }
 
-// Synchronizer performs at most one registration and one heartbeat.
+// Synchronizer performs at most one registration, heartbeat, and desired-state
+// retrieval.
 type Synchronizer struct {
 	client  Client
 	options Options
@@ -91,28 +95,31 @@ func NewWithDependencies(client Client, options Options, deps Dependencies) *Syn
 // Sync adds no Core object to the heartbeat snapshot itself. The returned
 // summary is attached only after network activity completes, avoiding recursive
 // status in the wire document.
-func (s *Synchronizer) Sync(ctx context.Context, report inventory.Report) (*inventory.Core, []inventory.Warning) {
+func (s *Synchronizer) Sync(ctx context.Context, report inventory.Report) (*inventory.Core, *inventory.DesiredState, []inventory.Warning) {
+	unavailableDesired := emptyDesiredState()
 	if !s.options.Enabled {
 		return &inventory.Core{
 			Registration: inventory.Operation{Status: "disabled"},
 			Heartbeat:    inventory.Operation{Status: "disabled"},
-		}, nil
+			DesiredState: inventory.Operation{Status: "disabled"},
+		}, unavailableDesired, nil
 	}
 
 	result := &inventory.Core{
 		Enabled:      true,
 		Registration: inventory.Operation{Status: "not_needed"},
 		Heartbeat:    inventory.Operation{Status: "skipped"},
+		DesiredState: inventory.Operation{Status: "skipped"},
 	}
 	state, err := s.loadState()
 	if errors.Is(err, errStateNotFound) {
 		state, err = s.register(ctx, report, result)
 		if err != nil {
-			return result, []inventory.Warning{{Source: "core.registration", Message: sanitizeError(err)}}
+			return result, unavailableDesired, []inventory.Warning{{Source: "core.registration", Message: sanitizeError(err)}}
 		}
 	} else if err != nil {
 		result.Registration.Status = "failed"
-		return result, []inventory.Warning{{Source: "core.state", Message: sanitizeError(err)}}
+		return result, unavailableDesired, []inventory.Warning{{Source: "core.state", Message: sanitizeError(err)}}
 	}
 
 	result.Registered = true
@@ -131,10 +138,25 @@ func (s *Synchronizer) Sync(ctx context.Context, report inventory.Report) (*inve
 	if err := s.heartbeat(ctx, report, state); err != nil {
 		result.Heartbeat.Status = "failed"
 		warnings = append(warnings, inventory.Warning{Source: "core.heartbeat", Message: sanitizeError(err)})
-		return result, warnings
+	} else {
+		result.Heartbeat.Status = "succeeded"
 	}
-	result.Heartbeat.Status = "succeeded"
-	return result, warnings
+
+	// Caller cancellation stops the remaining workflow. Ordinary heartbeat
+	// failures do not prevent observing desired state.
+	if ctx.Err() != nil {
+		return result, unavailableDesired, warnings
+	}
+	result.DesiredState.Attempted = true
+	document, err := s.desiredState(ctx, state)
+	if err != nil {
+		result.DesiredState.Status = "failed"
+		warnings = append(warnings, inventory.Warning{Source: "core.desired_state", Message: sanitizeError(err)})
+		return result, unavailableDesired, warnings
+	}
+	result.DesiredState.Status = "succeeded"
+	desiredInventory := document.Inventory()
+	return result, &desiredInventory, warnings
 }
 
 type stateDocument struct {
@@ -186,6 +208,7 @@ func (s *Synchronizer) register(ctx context.Context, report inventory.Report, re
 	}
 
 	report.Core = nil
+	report.DesiredState = nil
 	var response registrationResponse
 	err = s.client.DoJSONWithBearer(ctx, http.MethodPost, RegistrationEndpoint, token, registrationRequest{
 		SchemaVersion:   wireSchemaVersion,
@@ -216,6 +239,7 @@ func (s *Synchronizer) register(ctx context.Context, report inventory.Report, re
 
 func (s *Synchronizer) heartbeat(ctx context.Context, report inventory.Report, state stateDocument) error {
 	report.Core = nil
+	report.DesiredState = nil
 	endpoint := "v1/nodes/" + url.PathEscape(state.NodeID) + "/heartbeat"
 	return s.client.DoJSONWithBearer(ctx, http.MethodPost, endpoint, state.AgentToken, heartbeatRequest{
 		SchemaVersion: wireSchemaVersion,
@@ -223,6 +247,19 @@ func (s *Synchronizer) heartbeat(ctx context.Context, report inventory.Report, s
 		AgentVersion:  s.options.AgentVersion,
 		Inventory:     report,
 	}, nil)
+}
+
+func (s *Synchronizer) desiredState(ctx context.Context, state stateDocument) (desired.Document, error) {
+	endpoint := "v1/nodes/" + url.PathEscape(state.NodeID) + DesiredStateEndpointSuffix
+	var response desired.Document
+	if err := s.client.DoJSONWithBearer(ctx, http.MethodGet, endpoint, state.AgentToken, nil, &response); err != nil {
+		return desired.Document{}, err
+	}
+	return response, nil
+}
+
+func emptyDesiredState() *inventory.DesiredState {
+	return &inventory.DesiredState{Roles: []string{}, Capabilities: []string{}}
 }
 
 func (s *Synchronizer) fingerprint() (string, error) {

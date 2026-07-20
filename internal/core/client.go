@@ -1,6 +1,5 @@
-// Package core provides the secure HTTPS/JSON transport foundation for LTS
-// Core. Version 0.5 defines transport behavior only; registration,
-// authentication, and heartbeats are intentionally implemented later.
+// Package core provides the secure HTTPS/JSON transport used by LTS Core
+// registration, heartbeat, and desired-state workflows.
 package core
 
 import (
@@ -31,8 +30,7 @@ const (
 // ErrResponseTooLarge identifies a response that exceeded MaxResponseBytes.
 var ErrResponseTooLarge = errors.New("LTS Core response exceeds 1 MiB limit")
 
-// Options configures a Client. These values remain code-level in v0.5 and will
-// be connected to node configuration when registration is introduced.
+// Options configures a Client from validated agent configuration.
 type Options struct {
 	BaseURL   string
 	Timeout   time.Duration

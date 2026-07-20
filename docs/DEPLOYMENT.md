@@ -11,8 +11,8 @@ Run the full release target on Ubuntu or Debian with Go 1.25 or later and
 
 ```sh
 make release-linux-amd64
-dpkg-deb --info bin/lts-agent_0.7.1_amd64.deb
-dpkg-deb --contents bin/lts-agent_0.7.1_amd64.deb
+dpkg-deb --info bin/lts-agent_0.8.0_amd64.deb
+dpkg-deb --contents bin/lts-agent_0.8.0_amd64.deb
 ```
 
 macOS can run `make package-stage` to validate the filesystem layout without
@@ -25,8 +25,8 @@ Copy the package to the node and install it with apt so dependencies are
 validated:
 
 ```sh
-scp bin/lts-agent_0.7.1_amd64.deb ltsadmin@NODE:/tmp/
-ssh ltsadmin@NODE 'sudo apt install /tmp/lts-agent_0.7.1_amd64.deb'
+scp bin/lts-agent_0.8.0_amd64.deb ltsadmin@NODE:/tmp/
+ssh ltsadmin@NODE 'sudo apt install /tmp/lts-agent_0.8.0_amd64.deb'
 ```
 
 Installation creates a locked `lts-agent` system account, prepares
@@ -90,7 +90,8 @@ sudo -u lts-agent /usr/bin/lts-agent | jq .
 
 Verify that validation and health are available, Core is disabled or registered
 as intended, the process has no root privileges, and one invocation sends at
-most one registration request and one heartbeat.
+most one registration request, one heartbeat, and one desired-state retrieval.
+Desired state is reported but never applied or cached.
 
 ## Upgrade, remove, and recover
 

@@ -1,7 +1,7 @@
 GO ?= go
 GOCACHE ?= $(CURDIR)/.cache/go-build
 GOMODCACHE ?= $(CURDIR)/.cache/go-mod
-VERSION := 0.7.1
+VERSION := 0.8.0
 BIN_DIR := bin
 BINARY := $(BIN_DIR)/lts-agent
 LINUX_BINARY := $(BIN_DIR)/lts-agent-linux-amd64

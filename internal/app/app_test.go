@@ -22,13 +22,14 @@ type fakeRunner struct {
 
 type fakeCoreSynchronizer struct {
 	result   *inventory.Core
+	desired  *inventory.DesiredState
 	warnings []inventory.Warning
 	calls    int
 }
 
-func (s *fakeCoreSynchronizer) Sync(context.Context, inventory.Report) (*inventory.Core, []inventory.Warning) {
+func (s *fakeCoreSynchronizer) Sync(context.Context, inventory.Report) (*inventory.Core, *inventory.DesiredState, []inventory.Warning) {
 	s.calls++
-	return s.result, s.warnings
+	return s.result, s.desired, s.warnings
 }
 
 func (r *fakeRunner) Collect(context.Context) inventory.Report {
@@ -197,7 +198,9 @@ func TestRunSynchronizesCoreAndLogsNonfatalFailure(t *testing.T) {
 			NodeID:       "node-123",
 			Registration: inventory.Operation{Status: "not_needed"},
 			Heartbeat:    inventory.Operation{Attempted: true, Status: "failed"},
+			DesiredState: inventory.Operation{Attempted: true, Status: "succeeded"},
 		},
+		desired:  &inventory.DesiredState{Available: true, SchemaVersion: 1, Revision: "rev-1", Roles: []string{"application-node"}, Capabilities: []string{"docker"}},
 		warnings: []inventory.Warning{{Source: "core.heartbeat", Message: "LTS Core returned HTTP 503"}},
 	}
 	var stdout bytes.Buffer
@@ -215,12 +218,16 @@ func TestRunSynchronizesCoreAndLogsNonfatalFailure(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Core == nil || report.Core.Heartbeat.Status != "failed" || len(report.Warnings) != 1 {
+	if report.Core == nil || report.Core.Heartbeat.Status != "failed" || report.Core.DesiredState.Status != "succeeded" || report.DesiredState == nil || !report.DesiredState.Available || len(report.Warnings) != 1 {
 		t.Fatalf("report = %#v", report)
 	}
 	wantEvents := []string{"config_loaded", "collection_started", "core_sync_started", "inventory_warning", "core_sync_completed", "collection_completed"}
-	if got := logEvents(decodeLogs(t, stderr.String())); !reflect.DeepEqual(got, wantEvents) {
+	logs := decodeLogs(t, stderr.String())
+	if got := logEvents(logs); !reflect.DeepEqual(got, wantEvents) {
 		t.Fatalf("events = %#v, want %#v", got, wantEvents)
+	}
+	if logs[4]["desired_state_status"] != "succeeded" || logs[5]["desired_state_available"] != true {
+		t.Fatalf("desired-state log fields missing: %#v %#v", logs[4], logs[5])
 	}
 }
 
@@ -243,7 +250,7 @@ func TestRunCoreClientInitializationFailureIsNonfatal(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Core == nil || report.Core.Registration.Status != "failed" || report.Core.Heartbeat.Status != "skipped" || len(report.Warnings) != 1 || report.Warnings[0].Source != "core.client" {
+	if report.Core == nil || report.Core.Registration.Status != "failed" || report.Core.Heartbeat.Status != "skipped" || report.Core.DesiredState.Status != "skipped" || report.DesiredState == nil || report.DesiredState.Available || len(report.Warnings) != 1 || report.Warnings[0].Source != "core.client" {
 		t.Fatalf("report = %#v", report)
 	}
 }
@@ -265,7 +272,7 @@ func TestRunCoreDisabledNeverConstructsSynchronizer(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Core == nil || report.Core.Enabled || report.Core.Registration.Status != "disabled" {
+	if report.Core == nil || report.Core.Enabled || report.Core.Registration.Status != "disabled" || report.Core.DesiredState.Status != "disabled" || report.DesiredState == nil || report.DesiredState.Roles == nil || report.DesiredState.Capabilities == nil {
 		t.Fatalf("Core = %#v", report.Core)
 	}
 }

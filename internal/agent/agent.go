@@ -13,7 +13,7 @@ import (
 )
 
 // Version is the semantic version reported by this build of lts-agent.
-const Version = "0.7.1"
+const Version = "0.8.0"
 
 // SystemCollector is the system inventory boundary used by Agent.
 type SystemCollector interface {
@@ -87,7 +87,11 @@ func (a *Agent) Collect(ctx context.Context) inventory.Report {
 		System:     systemResult.System,
 		Assignment: assignmentResult,
 		Checks:     checkResults,
-		Warnings:   warnings,
+		DesiredState: &inventory.DesiredState{
+			Roles:        []string{},
+			Capabilities: []string{},
+		},
+		Warnings: warnings,
 	}
 }
 

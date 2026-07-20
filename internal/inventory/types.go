@@ -5,14 +5,15 @@ package inventory
 
 // Report is the complete inventory document emitted by the current agent.
 type Report struct {
-	Agent      Agent      `json:"agent"`
-	Node       Node       `json:"node"`
-	LBI        LBI        `json:"lbi"`
-	System     System     `json:"system"`
-	Assignment Assignment `json:"assignment"`
-	Checks     Checks     `json:"checks"`
-	Core       *Core      `json:"core,omitempty"`
-	Warnings   []Warning  `json:"warnings,omitempty"`
+	Agent        Agent         `json:"agent"`
+	Node         Node          `json:"node"`
+	LBI          LBI           `json:"lbi"`
+	System       System        `json:"system"`
+	Assignment   Assignment    `json:"assignment"`
+	Checks       Checks        `json:"checks"`
+	DesiredState *DesiredState `json:"desired_state,omitempty"`
+	Core         *Core         `json:"core,omitempty"`
+	Warnings     []Warning     `json:"warnings,omitempty"`
 }
 
 // Agent identifies the software that produced a report.
@@ -47,12 +48,22 @@ type System struct {
 	Timezone     string `json:"timezone"`
 }
 
-// Assignment describes the roles and capabilities desired for this node.
+// Assignment describes the roles and capabilities currently assigned locally.
 // Roles and Capabilities are always emitted as JSON arrays, including when the
 // assignment source is unavailable or contains no entries.
 type Assignment struct {
 	Available     bool     `json:"available"`
 	SchemaVersion int      `json:"schema_version,omitempty"`
+	Roles         []string `json:"roles"`
+	Capabilities  []string `json:"capabilities"`
+}
+
+// DesiredState is unapplied intent retrieved from LTS Core. The final command
+// output always includes it, while network request snapshots omit it.
+type DesiredState struct {
+	Available     bool     `json:"available"`
+	SchemaVersion int      `json:"schema_version,omitempty"`
+	Revision      string   `json:"revision,omitempty"`
 	Roles         []string `json:"roles"`
 	Capabilities  []string `json:"capabilities"`
 }
@@ -83,6 +94,7 @@ type Core struct {
 	NodeID       string    `json:"node_id,omitempty"`
 	Registration Operation `json:"registration"`
 	Heartbeat    Operation `json:"heartbeat"`
+	DesiredState Operation `json:"desired_state"`
 }
 
 // Operation is the stable state of one Core workflow stage.
